@@ -6,14 +6,19 @@ import "dotenv/config"
 import axios from "axios"
 import mongoose from "mongoose"
 import Payment from "./model/paymentModel.js"
+import ngrok from "ngrok"
+
 
 const app = express()
 
 const PORT = 2000
 
 app.use(express.json())
+
 app.use(express.urlencoded({extended:true}))
+
 app.use(cors())
+
 
 
 
@@ -25,6 +30,7 @@ mongoose.connect(process.env.MONGO_URL)
 .catch((err) => {
     console.log(err)
 })
+
 
 
 
@@ -44,7 +50,8 @@ const generateToken = async (req,res,next) => {
     const auth = new Buffer.from(`${consumer}:${secrete}`).toString("base64")
 
     await axios.get(
-        "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",{
+        "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+        {
         headers:{
             authorization : `Basic ${auth}`
         }
@@ -57,10 +64,24 @@ const generateToken = async (req,res,next) => {
     })
     .catch((err) => {
 
-        console.log(err)
+        console.log(err.messgae)
+
+        console.log("yap that's me")
 
     })
 }
+
+
+// testing access_token
+app.get('/access_token', generateToken ,(req,res) => {
+
+    res.status(200).json({
+        success:true,
+        message:'Token generated successfully',
+        token:req.token
+    })
+
+})
 
 
 // stk push
@@ -74,7 +95,7 @@ app.post("/stk", generateToken ,async (req,res) => {
 
     const date = new Date();
 
-   const timestamp = 
+    const timestamp = 
       date.getFullYear() + 
       ("0" + (date.getMonth() + 1)).slice(-2) +
       ("0" + date.getDate()).slice(-2) +
@@ -87,31 +108,34 @@ app.post("/stk", generateToken ,async (req,res) => {
     const passkey = process.env.PASS_KEY ;
 
     const password = new Buffer.from(shortcode + passkey + timestamp).toString("base64")
-
+    
+    
     await axios.post(
         "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
         {    
             "BusinessShortCode": shortcode,    
             "Password": password,    
             "Timestamp":timestamp,    
-            "TransactionType": "CustomerPayBillOnline",//"customerBuyGoodsOnline"    
+            "TransactionType":"CustomerPayBillOnline",//"customerBuyGoodsOnline"    
             "Amount": amount,    
             "PartyA":`254${phone}`,    
             "PartyB":shortcode,    
             "PhoneNumber":`254${phone}`,    
-            "CallBackURL": "https://0c12-41-209-60-94.ngrok-free.app/callback",    
+            "CallBackURL":`https://c745-41-90-175-55.ngrok-free.app/callback`,
             "AccountReference":`CLIVON OSIRE COMPANY`,    
             "TransactionDesc":"Test"
         },
         {
             headers:{
-                Authorization:`Bearer ${token}`
+                "Authorization":`Bearer ${token}`,
+                "Content-Type":"application/json"
             }
         }
     )
     .then((response) => {
 
         res.status(200).json(response.data)
+
 
     })
     .catch((err) => {
@@ -128,42 +152,124 @@ app.post("/stk", generateToken ,async (req,res) => {
 // callback
 app.post('/callback', async (req,res) => {
 
-    const callbackData = req.body ;
+    // console.log("Full Callback Data",JSON.stringify(req.body, null,2))
 
+    console.log("finally bro you made it")
 
-    if(!callbackData.Body.callbackMetadata)
+    // check if body exists
+    if(!req.body.Body)
     {
-        console.log(callbackData.Body)
-
-        res.json("ok")
+        throw new Error("Callback body structure is invalid.'Body' feild is invalid")
     }
 
+    const {
+        MerchantRequestID,
+        CheckoutRequestID,
+        ResultCode,
+        ResultDesc,
+        CallbackMetadata
+    } = req.body.Body.stkCallback
 
-    const phone =  callbackData.Body.stkCallback.callbackMetadata.Item[4].Value
 
-    const amount = callbackData.Body.stkCallback.callbackMetadata.Item[0].Value
+    const metaItems = Object.values(await CallbackMetadata.Item)
 
-    const trnx_id = callbackData.Body.stkCallback.callbackMetadata.Item[1].Value
+    const amount = metaItems.find(item => item.Name === 'PhoneNumber')?.Value.toString()
 
-    console.log({phone, amount, trnx_id})
+    const phone = metaItems.find(item => item.Name === 'Amount')?.Value.toString()
 
-    const payment = new Payment()
+    const trnx_id = metaItems.find(item => item.Name === 'MpesaReceiptNumber')?.Value.toString()
+     
 
-    payment.number = phone ;
+    const payment = new Payment({
+        phone,
+        amount,
+        trnx_id
+    })
 
-    payment.amount = amount ;
-
-    payment.trnx_id = trnx_id ;
-
-    await Payment.save()
-            .then((response) => {
-                console.log({message:"saved successfully",response})
-            })
-            .catch((err) => {
-                console.log(err.message)
-            })
+    res.status(200).json({success:true , payment})
 
 })
+
+
+// cornfirmPayment
+app.post('/confirmPayment/:CheckoutRequestID',generateToken, async (req,res) => {
+
+    try
+    {
+        const token = req.token
+
+        const auth = "Bearer" + token
+
+        const date = new Date();
+
+        const url = "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
+
+        const timestamp = 
+          date.getFullYear() + 
+          ("0" + (date.getMonth() + 1)).slice(-2) +
+          ("0" + date.getDate()).slice(-2) +
+          ("0" + date.getHours()).slice(-2) +
+          ("0" + date.getMinutes()).slice(-2) +
+          ("0" + date.getSeconds()).slice(-2) 
+    
+        const shortcode = process.env.PAYBILL 
+    
+        const passkey = process.env.PASS_KEY ;
+    
+        const password = new Buffer.from(shortcode + passkey + timestamp).toString("base64")
+        
+
+        const requestBody = {
+            "BusinessShortCode":shortcode,
+            Password:password,
+            Timestamp:timestamp,
+            CheckoutRequestID:req.params.CheckoutRequestID
+        }
+
+        const response = await axios.post(
+            url,
+            requestBody,
+            {
+                headers:{
+                    "Authorization":auth,
+                    
+                }
+            }
+        )
+
+        res.status(200).json(response.data)
+
+    }
+    catch(error)
+    {
+        console.log("Error wwhile trying to create stk")
+
+        res.status(503).send({
+            message:"Something went wrong",
+            error:error.message || error
+        })
+    }
+
+})
+
+
+// payments
+app.get('/getPayments',async (req,res) => {
+
+  try
+  {
+    const payMents = await Payment.find({})
+
+    res.status(200).json({success:true ,payMents})
+
+  }
+  catch(error)
+  {
+    console.log(error.messege)
+  }
+
+})
+
 
 
 
