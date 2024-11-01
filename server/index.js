@@ -121,7 +121,7 @@ app.post("/stk", generateToken ,async (req,res) => {
             "PartyA":`254${phone}`,    
             "PartyB":shortcode,    
             "PhoneNumber":`254${phone}`,    
-            "CallBackURL":`https://c745-41-90-175-55.ngrok-free.app/callback`,
+            "CallBackURL":"https://mpesa-3h54.onrender.com/callback",
             "AccountReference":`CLIVON OSIRE COMPANY`,    
             "TransactionDesc":"Test"
         },
@@ -152,7 +152,7 @@ app.post("/stk", generateToken ,async (req,res) => {
 // callback
 app.post('/callback', async (req,res) => {
 
-    // console.log("Full Callback Data",JSON.stringify(req.body, null,2))
+    console.log("Full Callback Data",JSON.stringify(req.body, null,2))
 
     console.log("finally bro you made it")
 
